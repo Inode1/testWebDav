@@ -1,0 +1,2 @@
+#! /bin/sh
+./configure --with-libxml2 --with-ssl --without-pakchois --without-gssapi --without-libproxy --with-libs=/usr/local/ssl --enable-debug
