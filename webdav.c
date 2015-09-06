@@ -20,6 +20,7 @@
 
 #define FAIL    -1
 #define AUTH_DATA_LENGHT 150
+#define HEADER_SIZE (AUTH_DATA_LENGHT + sizeof(template_header)) 
 
 /*--------------------------------------------------------------------*/
 static const char template_header[] = "PROPFIND / HTTP/1.1\r\n"
@@ -27,8 +28,6 @@ static const char template_header[] = "PROPFIND / HTTP/1.1\r\n"
 								      "Accept: */*\r\n""Depth: 1\r\n"
 								      "Authorization: Basic %s\r\n\r\n";
 static char auth_data[AUTH_DATA_LENGHT];
-
-#define HEADER_SIZE (AUTH_DATA_LENGHT + sizeof(template_header))
 static char header[HEADER_SIZE];
 
 
