@@ -1,113 +1,150 @@
-/*
- * webdav.c
- */
+// ssl_client.c
+
+/*****************************************************************************/
+/*** ssl_client.c                                                          ***/
+/***                                                                       ***/
+/*** Demonstrate an SSL client.                                            ***/
+/*****************************************************************************/
+
 #include <stdio.h>
+#include <unistd.h>
+#include <malloc.h>
 #include <string.h>
-#include <stdlib.h>
+#include <sys/socket.h>
+#include <resolv.h>
+#include <netdb.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
 
-#define NE_DEBUGGING
+#include <fcntl.h>
 
-#include <neon/ne_utils.h>
-#include <neon/ne_socket.h>
-#include <neon/ne_session.h>
-#include <neon/ne_auth.h>
-#include <neon/ne_request.h>
+#define FAIL    -1
 
-void dump_cert(const ne_ssl_certificate *cert) {
-  const char *id = ne_ssl_cert_identity(cert);
-  char *dn;
+/*---------------------------------------------------------------------*/
+/*--- OpenConnection - create socket and connect to server.         ---*/
+/*---------------------------------------------------------------------*/
+int OpenConnection(const char *hostname, int port)
+{   int sd;
+    struct hostent *host;
+    struct sockaddr_in addr;
 
-  if (id)
-    printf("Certificate was issued for '%s'.\n", id);
-
-  dn = ne_ssl_readable_dname(ne_ssl_cert_subject(cert));
-  printf("Subject: %s\n", dn);
-  free(dn);
-
-  dn = ne_ssl_readable_dname(ne_ssl_cert_issuer(cert));
-  printf("Issuer: %s\n", dn);
-  free(dn);
-}
-
-static int
-my_verify(void *userdata, int failures, const ne_ssl_certificate *cert)
-{
-  const char *hostname = userdata;
-
-  dump_cert(cert);
-
-  puts("Certificate verification failed - the connection may have been "
-       "intercepted by a third party!");
-
-  if (failures & NE_SSL_IDMISMATCH) {
-    const char *id = ne_ssl_cert_identity(cert);
-    if (id)
-      printf("Server certificate was issued to '%s' not '%s'.\n",
-             id, hostname);
-    else
-      printf("The certificate was not issued for '%s'\n", hostname);
-  }
-
-  if (failures & NE_SSL_UNTRUSTED)
-    puts("The certificate is not signed by a trusted Certificate Authority.");
-
-  /* ... check for validity failures ... */
-
-/*  if (prompt_user())
-    return 1;  fail verification
-  else
-    return 0;  trust the certificate anyway */
-    return 0;
-}
-
-static int
-my_auth(void *userdata, const char *realm, int attempts,
-        char *username, char *password)
-{
-    printf("Use pass and username\n");
-    strncpy(username, "iv.test2016", 50);
-    strncpy(password, "zreirby", 50);
-    return attempts;
-}
-
-int main()
-{
-    // init neon lib
-    if (ne_sock_init())
+    if ( (host = gethostbyname(hostname)) == NULL )
     {
-        printf("Error when try init neon library\n");
+        perror(hostname);
+		printf("errrororo");
+        abort();
     }
+    printf("Connect openned\n");
 
-    ne_session *sess = ne_session_create("https", "webdav.yandex.ru", 443);
-    printf("Error was: %s\n", ne_get_error(sess));
-    ne_ssl_set_verify(sess, my_verify, "webdav.yandex.ru");
-    ne_set_server_auth(sess, my_auth, NULL);
-    /* ne_request_dispatch: Sends the given request, and reads the
-     * response.  Returns:
-     *  - NE_OK if the request was sent and response read successfully
-     *  - NE_AUTH, NE_PROXYAUTH for a server or proxy server authentication error
-     *  - NE_CONNECT if connection could not be established
-     *  - NE_TIMEOUT if an timeout occurred sending or reading from the server
-     *  - NE_ERROR for other fatal dispatch errors
-     * On any error, the session error string is set.  On success or
-     * authentication error, the actual response-status can be retrieved using
-     * ne_get_status(). */
-    ne_request *req = ne_request_create(sess, "PROPFIND", "/Music");
-    int status;
+    sd = socket(PF_INET, SOCK_STREAM, 0);
 
-    if ((status = ne_request_dispatch(req)) == NE_OK) {
-        ne_read_response_to_fd(req, 1);
-/*        int status = ne_discard_response(req);
-        printf("Status: %d", status);
-        const char *mtime = ne_get_response_header(req, "Last-Modified");
-        if (mtime) {
-            printf("/foo.txt has last-modified value %s\n", mtime);
-        }*/
+	bzero(&addr, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = *(long*)(host->h_addr);
+    if ( connect(sd, (struct sockaddr *)&addr, sizeof(addr)) != 0 )
+    {
+        close(sd);
+        perror(hostname);
+        abort();
     }
-    ne_request_destroy(req);
-    printf("Status: %d", status);
-    printf("Error was: %s\n", ne_get_error(sess));
-    ne_sock_exit();
-    return 0;
+    return sd;
+}
 
+/*---------------------------------------------------------------------*/
+/*--- InitCTX - initialize the SSL engine.                          ---*/
+/*---------------------------------------------------------------------*/
+SSL_CTX* InitCTX(void)
+{   const SSL_METHOD *method;
+    SSL_CTX *ctx;
+
+    OpenSSL_add_all_algorithms();		/* Load cryptos, et.al. */
+ERR_load_BIO_strings();
+  ERR_load_crypto_strings();
+  SSL_load_error_strings();    
+
+
+//SSL_load_error_strings();			/* Bring in and register error messages */
+if (SSL_library_init() < 0)
+    printf("Could not initialize the OpenSSL library");    
+
+    method = SSLv23_client_method();		/* Create new client-method instance */
+    ctx = SSL_CTX_new(method);			/* Create new context */
+    if ( ctx == NULL )
+    {
+        ERR_print_errors_fp(stderr);
+        abort();
+    }
+    return ctx;
+}
+
+/*---------------------------------------------------------------------*/
+/*--- ShowCerts - print out the certificates.                       ---*/
+/*---------------------------------------------------------------------*/
+void ShowCerts(SSL* ssl)
+{   X509 *cert;
+    char *line;
+
+    cert = SSL_get_peer_certificate(ssl);	/* get the server's certificate */
+    if ( cert != NULL )
+    {
+        printf("Server certificates:\n");
+        line = X509_NAME_oneline(X509_get_subject_name(cert), 0, 0);
+        printf("Subject: %s\n", line);
+        free(line);							/* free the malloc'ed string */
+        line = X509_NAME_oneline(X509_get_issuer_name(cert), 0, 0);
+        printf("Issuer: %s\n", line);
+        free(line);							/* free the malloc'ed string */
+        X509_free(cert);					/* free the malloc'ed certificate copy */
+    }
+    else
+        printf("No certificates.\n");
+}
+
+/*---------------------------------------------------------------------*/
+/*--- main - create SSL context and connect                         ---*/
+/*---------------------------------------------------------------------*/
+int main(int count, char *strings[])
+{   SSL_CTX *ctx;
+    int server;
+    SSL *ssl;
+    char buf[1024];
+    int bytes;
+    char *hostname, *portnum;
+
+   /* if ( count != 3 )
+    {
+        printf("usage: %s <hostname> <portnum>\n", strings[0]);
+        exit(0);
+    }*/
+	// hostname=strings[1];
+	// portnum=strings[2];
+
+    ctx = InitCTX();
+    server = OpenConnection("webdav.yandex.ru", 443);
+	printf("Connect openned\n");
+    ssl = SSL_new(ctx);						/* create new SSL connection state */
+	SSL_set_fd(ssl, server);				/* attach the socket descriptor */
+   
+     if ( SSL_connect(ssl) == FAIL )			/* perform the connection */
+        ERR_print_errors_fp(stderr);
+    else
+    {   char *msg = "PROPFIND / HTTP/1.1\r\n"
+					"Host: webdav.yandex.ru\r\n"
+					"Accept: */*\r\n"
+				    "Depth: 1\r\n"
+					"Authorization: Basic aXYudGVzdDIwMTY6enJlaXJieQ==\r\n\r\n";
+
+        printf("Connected with %s encryption\n", SSL_get_cipher(ssl));
+        ShowCerts(ssl);								/* get any certs */
+        printf("Send : %s\n", msg);        
+        SSL_write(ssl, msg, strlen(msg));			/* encrypt & send message */
+        bytes = SSL_read(ssl, buf, sizeof(buf));	/* get reply & decrypt */
+        buf[bytes] = 0;
+        printf("Received: \"%s\"\n", buf);
+
+        SSL_free(ssl);								/* release connection state */
+    }
+    close(server);									/* close socket */
+    SSL_CTX_free(ctx);								/* release context */
 }
