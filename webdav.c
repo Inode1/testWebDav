@@ -16,22 +16,35 @@
 #include <openssl/ssl.h>
 #include <openssl/err.h>
 
-#include <fcntl.h>
+#include "utility.h"
 
 #define FAIL    -1
+#define AUTH_DATA_LENGHT 150
+
+/*--------------------------------------------------------------------*/
+static const char template_header[] = "PROPFIND / HTTP/1.1\r\n"
+									  "Host: webdav.yandex.ru\r\n"
+								      "Accept: */*\r\n""Depth: 1\r\n"
+								      "Authorization: Basic %s\r\n\r\n";
+static char auth_data[AUTH_DATA_LENGHT];
+
+#define HEADER_SIZE (AUTH_DATA_LENGHT + sizeof(template_header))
+static char header[HEADER_SIZE];
+
+
 
 /*---------------------------------------------------------------------*/
 /*--- OpenConnection - create socket and connect to server.         ---*/
 /*---------------------------------------------------------------------*/
 int OpenConnection(const char *hostname, int port)
-{   int sd;
+{   
+	int sd;
     struct hostent *host;
     struct sockaddr_in addr;
 
     if ( (host = gethostbyname(hostname)) == NULL )
     {
         perror(hostname);
-		printf("errrororo");
         abort();
     }
     printf("Connect openned\n");
@@ -52,22 +65,24 @@ int OpenConnection(const char *hostname, int port)
 }
 
 /*---------------------------------------------------------------------*/
-/*--- InitCTX - initialize the SSL engine.                          ---*/
+/*--- InitSSL - initialize the SSL engine.                          ---*/
 /*---------------------------------------------------------------------*/
-SSL_CTX* InitCTX(void)
-{   const SSL_METHOD *method;
+SSL_CTX* InitSSL(void)
+{   
+	const SSL_METHOD *method;
     SSL_CTX *ctx;
 
     OpenSSL_add_all_algorithms();		/* Load cryptos, et.al. */
-ERR_load_BIO_strings();
-  ERR_load_crypto_strings();
-  SSL_load_error_strings();    
+	ERR_load_BIO_strings();
+	ERR_load_crypto_strings();
+	SSL_load_error_strings();    
 
 
-//SSL_load_error_strings();			/* Bring in and register error messages */
-if (SSL_library_init() < 0)
-    printf("Could not initialize the OpenSSL library");    
-
+	//SSL_load_error_strings();			/* Bring in and register error messages */
+	if (SSL_library_init() < 0)
+	{
+		printf("Could not initialize the OpenSSL library");    
+	}
     method = SSLv23_client_method();		/* Create new client-method instance */
     ctx = SSL_CTX_new(method);			/* Create new context */
     if ( ctx == NULL )
@@ -82,7 +97,8 @@ if (SSL_library_init() < 0)
 /*--- ShowCerts - print out the certificates.                       ---*/
 /*---------------------------------------------------------------------*/
 void ShowCerts(SSL* ssl)
-{   X509 *cert;
+{   
+	X509 *cert;
     char *line;
 
     cert = SSL_get_peer_certificate(ssl);	/* get the server's certificate */
@@ -105,40 +121,50 @@ void ShowCerts(SSL* ssl)
 /*--- main - create SSL context and connect                         ---*/
 /*---------------------------------------------------------------------*/
 int main(int count, char *strings[])
-{   SSL_CTX *ctx;
+{   
+	SSL_CTX *ctx;
     int server;
     SSL *ssl;
     char buf[1024];
     int bytes;
-    char *hostname, *portnum;
 
-   /* if ( count != 3 )
+    if ( count != 3 )
     {
-        printf("usage: %s <hostname> <portnum>\n", strings[0]);
+        printf("usage: %s <login name> <password>\n", strings[0]);
         exit(0);
-    }*/
-	// hostname=strings[1];
-	// portnum=strings[2];
+    }
+	int write_byte = snprintf(auth_data, AUTH_DATA_LENGHT, "%s:%s", strings[1], strings[2]);
+	if (write_byte < 0 || write_byte >= AUTH_DATA_LENGHT)
+	{
+		fprintf(stderr, "login name and pass to big, need resize buffer\n");
+		exit(0);
+	}
 
-    ctx = InitCTX();
+	char* base64EncodeOutput;
+	Base64Encode(auth_data, strlen(auth_data), &base64EncodeOutput);	
+
+	write_byte = snprintf(header, HEADER_SIZE, template_header, base64EncodeOutput);                                       
+    if (write_byte < 0 || write_byte >= HEADER_SIZE)
+	{
+		fprintf(stderr, "Header construct, need resize buffer\n");
+		exit(0);
+	}
+    ctx = InitSSL();
     server = OpenConnection("webdav.yandex.ru", 443);
 	printf("Connect openned\n");
     ssl = SSL_new(ctx);						/* create new SSL connection state */
 	SSL_set_fd(ssl, server);				/* attach the socket descriptor */
    
-     if ( SSL_connect(ssl) == FAIL )			/* perform the connection */
-        ERR_print_errors_fp(stderr);
-    else
-    {   char *msg = "PROPFIND / HTTP/1.1\r\n"
-					"Host: webdav.yandex.ru\r\n"
-					"Accept: */*\r\n"
-				    "Depth: 1\r\n"
-					"Authorization: Basic aXYudGVzdDIwMTY6enJlaXJieQ==\r\n\r\n";
-
+    if (SSL_connect(ssl) == FAIL )			/* perform the connection */
+    {
+		ERR_print_errors_fp(stderr);
+    }
+	else
+    {
         printf("Connected with %s encryption\n", SSL_get_cipher(ssl));
         ShowCerts(ssl);								/* get any certs */
-        printf("Send : %s\n", msg);        
-        SSL_write(ssl, msg, strlen(msg));			/* encrypt & send message */
+        printf("Send : %s\n", header);        
+        SSL_write(ssl, header, strlen(header));			/* encrypt & send message */
         bytes = SSL_read(ssl, buf, sizeof(buf));	/* get reply & decrypt */
         buf[bytes] = 0;
         printf("Received: \"%s\"\n", buf);
