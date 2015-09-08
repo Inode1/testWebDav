@@ -1,7 +1,10 @@
+#include <stdint.h>
+#include <fcntl.h>
+#include <sys/epoll.h>
+
 #include <openssl/bio.h>
 #include <openssl/evp.h>
 #include <openssl/buffer.h>
-#include <stdint.h>
 
 #include "utility.h"
 
@@ -102,16 +105,74 @@ int OpenConnection(const char *hostname, int port)
 
     sd = socket(PF_INET, SOCK_STREAM, 0);
 
+    if (fcntl (sd, F_SETFL, fcntl(sd, F_GETFL, 0) | O_NONBLOCK) == -1)
+    {
+        perror ("fcntl");
+        abort();
+    }
+
     bzero(&addr, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     addr.sin_addr.s_addr = *(long*)(host->h_addr);
-    if ( connect(sd, (struct sockaddr *)&addr, sizeof(addr)) != 0 )
+    int status = connect(sd, (struct sockaddr *)&addr, sizeof(addr));
+
+    if (status < 0 && errno != EINPROGRESS)
     {
         close(sd);
         perror(hostname);
         abort();
     }
+    if (status != 0)
+    {
+        struct epoll_event event;
+        int
+        status = epoll_create1 (0);
+        if (status == -1)
+        {
+        	perror ("epoll_create");
+            abort ();
+        }
+        event.data.fd = sd;
+        event.events = EPOLLOUT;
+        if (epoll_ctl (status, EPOLL_CTL_ADD, sd, &event) == -1)
+        {
+        	perror ("epoll_ctl");
+            abort ();
+        }
+        struct epoll_event events;
+        if (epoll_wait (status, &events, 1, 1000) <= 0)
+        {
+        	perror ("connect fail");
+            abort ();
+        }
+        else
+        {
+        	if (events.events & EPOLLOUT)
+        	{
+        		int result;
+        		socklen_t result_len = sizeof(result);
+        		if (getsockopt(sd, SOL_SOCKET, SO_ERROR, &result, &result_len) < 0)
+        		{
+        			perror ("get sock fail");
+        			abort ();
+        		}
+
+        		if (result != 0) {
+        			perror ("connect fail");
+        			abort ();
+        		}
+        	}
+        	else
+        	{
+    			perror ("connect fail");
+    			abort ();
+        	}
+
+        }
+
+    }
+
     return sd;
 }
 
