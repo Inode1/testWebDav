@@ -4,11 +4,9 @@
 
 #define FAIL    -1
 #define AUTH_DATA_LENGHT 150
-#define HEADER_SIZE 400
 
 /*--------------------------------------------------------------------*/
 static char auth_data[AUTH_DATA_LENGHT];
-static char header[HEADER_SIZE];
 enum EMethod
 {
     None,
@@ -28,7 +26,6 @@ int main(int count, char *strings[])
     int bytes;
     enum EMethod method = None;
 
-
     if ( count != 5 )
     {
         printf("usage: %s <login name> <password> <method=[put|get]> <file>\n", strings[0]);
@@ -44,13 +41,6 @@ int main(int count, char *strings[])
 
 	char* base64EncodeOutput;
 	Base64Encode(auth_data, strlen(auth_data), &base64EncodeOutput);	
-
-	write_byte = snprintf(header, HEADER_SIZE, template_header_propfind, base64EncodeOutput);
-    if (write_byte < 0 || write_byte >= HEADER_SIZE)
-	{
-		fprintf(stderr, "Header construct, need resize buffer\n");
-		exit(0);
-	}
     // --- get user data end ---
     // --- check method ---
     if (!strcmp(strings[3], "put"))
@@ -87,7 +77,7 @@ int main(int count, char *strings[])
 		ERR_print_errors_fp(stderr);
     }
     printf("Connected with %s encryption\n", SSL_get_cipher(ssl));
-    ShowCerts(ssl);								/* get any certs */
+    ShowCerts(ssl);							/* get any certs */
     if (method == Put)
     {
 
@@ -104,8 +94,8 @@ int main(int count, char *strings[])
     buf[bytes] = 0;
     printf("Received: \"%s\"\n", buf);
 
-    SSL_free(ssl);								/* release connection state */
 
+    SSL_free(ssl);								/* release connection state */
     close(server);									/* close socket */
     SSL_CTX_free(ctx);								/* release context */
     return 0;
