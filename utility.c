@@ -45,7 +45,8 @@ int TakeMD5HashForFile(const char* filename, char result[2*MD5_DIGEST_LENGTH + 1
     }
 
     MD5_Final (hash, &md5Context);
-    for(int i = 0; i < MD5_DIGEST_LENGTH; i++)
+    int i = 0;
+    for(; i < MD5_DIGEST_LENGTH; i++)
     {
         sprintf(result + (i * 2), "%02x", hash[i]);
     }
@@ -72,7 +73,8 @@ int TakeSHA256HashForFile(const char* filename, char result[2*SHA256_DIGEST_LENG
         SHA256_Update(&sha256Context, data, bytes);
     }
     SHA256_Final(hash, &sha256Context);
-    for(int i = 0; i < SHA256_DIGEST_LENGTH; i++)
+    int i = 0;
+    for(; i < SHA256_DIGEST_LENGTH; i++)
     {
         sprintf(result + (i * 2), "%02x", hash[i]);
     }
@@ -80,4 +82,88 @@ int TakeSHA256HashForFile(const char* filename, char result[2*SHA256_DIGEST_LENG
 
     fclose(file);
     return 0;
+}
+
+/*---------------------------------------------------------------------*/
+/*--- OpenConnection - create socket and connect to server.         ---*/
+/*---------------------------------------------------------------------*/
+int OpenConnection(const char *hostname, int port)
+{
+    int sd;
+    struct hostent *host;
+    struct sockaddr_in addr;
+
+    if ( (host = gethostbyname(hostname)) == NULL )
+    {
+        perror(hostname);
+        abort();
+    }
+    printf("Connect openned\n");
+
+    sd = socket(PF_INET, SOCK_STREAM, 0);
+
+    bzero(&addr, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = *(long*)(host->h_addr);
+    if ( connect(sd, (struct sockaddr *)&addr, sizeof(addr)) != 0 )
+    {
+        close(sd);
+        perror(hostname);
+        abort();
+    }
+    return sd;
+}
+
+/*---------------------------------------------------------------------*/
+/*--- InitSSL - initialize the SSL engine.                          ---*/
+/*---------------------------------------------------------------------*/
+SSL_CTX* InitSSL(void)
+{
+    const SSL_METHOD *method;
+    SSL_CTX *ctx;
+
+    OpenSSL_add_all_algorithms();       /* Load cryptos, et.al. */
+    ERR_load_BIO_strings();
+    ERR_load_crypto_strings();
+    SSL_load_error_strings();
+
+
+    //SSL_load_error_strings();         /* Bring in and register error messages */
+    if (SSL_library_init() < 0)
+    {
+        printf("Could not initialize the OpenSSL library");
+    }
+    method = SSLv23_client_method();        /* Create new client-method instance */
+    ctx = SSL_CTX_new(method);          /* Create new context */
+    if ( ctx == NULL )
+    {
+        ERR_print_errors_fp(stderr);
+        abort();
+    }
+    return ctx;
+}
+
+/*---------------------------------------------------------------------*/
+/*--- ShowCerts - print out the certificates.                       ---*/
+/*---------------------------------------------------------------------*/
+void ShowCerts(SSL* ssl)
+{
+    X509 *cert;
+    char *line;
+
+    cert = SSL_get_peer_certificate(ssl);   /* get the server's certificate */
+    if ( cert != NULL )
+    {
+        printf("Server certificates:\n");
+        line = X509_NAME_oneline(X509_get_subject_name(cert), 0, 0);
+        printf("Subject: %s\n", line);
+        free(line);                         /* free the malloc'ed string */
+        line = X509_NAME_oneline(X509_get_issuer_name(cert), 0, 0);
+        printf("Issuer: %s\n", line);
+        free(line);                         /* free the malloc'ed string */
+        X509_free(cert);                    /* free the malloc'ed certificate copy */
+    }
+    else
+        printf("No certificates.\n");
 }
