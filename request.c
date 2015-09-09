@@ -1,6 +1,9 @@
 /*
  * request.c
  */
+#include <stdint.h>
+#include <fcntl.h>
+#include <sys/epoll.h>
 #include <libgen.h>
 #include <sys/stat.h>
 
@@ -129,17 +132,77 @@ int RequestPutFile(SSL* ssl, const char *basicAuth, char *file)
     printf("Send : %s\n", header);
 #endif
 
-    char buf[BUFFER_SIZE];
     // send header
     SSL_write(ssl, header, strlen(header));			/* encrypt & send message */
     // get response header
-    int bytes = SSL_read(ssl, buf, BUFFER_SIZE);	    /* get reply & decrypt */
-    buf[bytes] = 0;
 
-#ifdef DEBUG
-    printf("Received byte: %d\n", bytes);
-    printf("Received: %s\n", buf);
-#endif
+    struct epoll_event event, events;
+    int epoll;
+    if ( (epoll = epoll_create1(0)) == -1)
+    {
+        perror ("epoll_create");
+        return 1;
+    }
 
+    int sd = SSL_get_fd(ssl);
+    if (sd == -1)
+    {
+        fprintf(stderr, "SSl get file descriptor fail\n");
+        return 1;
+    }
+
+    event.data.fd = sd;
+    event.events = EPOLLIN | EPOLLET;
+    if (epoll_ctl (epoll, EPOLL_CTL_ADD, sd, &event) == -1)
+    {
+        perror ("epoll_ctl");
+        abort ();
+    }
+
+    char buf[BUFFER_SIZE];
+    int n;
+    while(1)
+    {
+        if ((n = epoll_wait (epoll, &events, 1, 3000)) <= 0)
+        {
+            if (n == 0)
+            {
+                printf("Timeout exceed\n");
+                break;
+            }
+            perror ("epoll waite");
+            close(epoll);
+            return 1;
+        }
+        if ((events.events & EPOLLERR) || (events.events & EPOLLHUP) ||
+           (!events.events & EPOLLIN))
+        {
+            fprintf (stderr, "epoll error\n");
+            close (epoll);
+            return 1;
+        }
+        else
+        {
+            while (1)
+            {
+                n = SSL_read (ssl, buf, BUFFER_SIZE);
+                if (n <= 0)
+                {
+                    break;
+                }
+                buf[n] = 0;
+                /* Write the buffer to standard output */
+                #ifdef DEBUG
+                    printf("Recv : %s\n", buf);
+                #endif
+            }
+
+        }
+    }
+
+
+/*    int bytes = SSL_read(ssl, buf, BUFFER_SIZE);	     get reply & decrypt
+    buf[bytes] = 0;*/
+    close(epoll);
     return 0;
 }

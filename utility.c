@@ -126,7 +126,6 @@ int OpenConnection(const char *hostname, int port)
     if (status != 0)
     {
         struct epoll_event event;
-        int
         status = epoll_create1 (0);
         if (status == -1)
         {
@@ -141,9 +140,9 @@ int OpenConnection(const char *hostname, int port)
             abort ();
         }
         struct epoll_event events;
-        if (epoll_wait (status, &events, 1, 1000) <= 0)
+        if (epoll_wait (status, &events, 1, 2000) <= 0) // 2 second
         {
-        	perror ("connect fail");
+        	perror ("connect wait error");
             abort ();
         }
         else
@@ -159,7 +158,7 @@ int OpenConnection(const char *hostname, int port)
         		}
 
         		if (result != 0) {
-        			perror ("connect fail");
+        			perror ("get socket error");
         			abort ();
         		}
         	}
@@ -170,6 +169,7 @@ int OpenConnection(const char *hostname, int port)
         	}
 
         }
+        close(status);
 
     }
 

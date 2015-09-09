@@ -70,6 +70,7 @@ int main(int count, char *strings[])
     ssl = SSL_new(ctx);						/* create new SSL connection state */
 	SSL_set_fd(ssl, server);				/* attach the socket descriptor */
    
+	// SSL_set_mode(ssl, SSL_MODE_AUTO_RETRY); // Can delete next loop, maybe
 	while(1)
 	{
 		int err = SSL_connect(ssl);			/* perform the connection */
@@ -94,7 +95,7 @@ int main(int count, char *strings[])
     ShowCerts(ssl);							/* get any certs */
     if (method == Put)
     {
-    	if (RequestPutFile(ssl, auth_data, strings[4]))
+    	if (RequestPutFile(ssl, base64EncodeOutput, strings[4]))
     	{
             fprintf(stderr, "Put method fail\n");
             exit(0);
@@ -102,7 +103,7 @@ int main(int count, char *strings[])
     }
     else
     {
-    	if (RequestGetFile(ssl, auth_data, strings[4]))
+    	if (RequestGetFile(ssl, base64EncodeOutput, strings[4]))
     	{
             fprintf(stderr, "Get method fail\n");
             exit(0);
