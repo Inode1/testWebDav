@@ -1,6 +1,6 @@
 // swebdav.c
 #include "utility.h"
-#include "header_template.h"
+#include "request.h"
 
 #define FAIL    -1
 #define AUTH_DATA_LENGHT 150
@@ -22,8 +22,6 @@ int main(int count, char *strings[])
 	SSL_CTX *ctx;
     int server;
     SSL *ssl;
-    char buf[1024];
-    int bytes;
     enum EMethod method = None;
 
     if ( count != 5 )
@@ -72,28 +70,44 @@ int main(int count, char *strings[])
     ssl = SSL_new(ctx);						/* create new SSL connection state */
 	SSL_set_fd(ssl, server);				/* attach the socket descriptor */
    
-    if (SSL_connect(ssl) == FAIL )			/* perform the connection */
-    {
-		ERR_print_errors_fp(stderr);
-    }
+	while(1)
+	{
+		int err = SSL_connect(ssl);			/* perform the connection */
+
+		if (err == 1)
+		{
+			break;
+		}
+		int err2 = SSL_get_error(ssl,err);
+		switch(err2) {
+				case SSL_ERROR_WANT_READ:
+				case SSL_ERROR_WANT_WRITE:
+					break;
+				default:
+					printf("SSL_connect err=%s\n",ERR_error_string(err2,0));
+					abort();
+					break;
+		}
+	}
+
     printf("Connected with %s encryption\n", SSL_get_cipher(ssl));
     ShowCerts(ssl);							/* get any certs */
     if (method == Put)
     {
-
+    	if (RequestPutFile(ssl, auth_data, strings[4]))
+    	{
+            fprintf(stderr, "Put method fail\n");
+            exit(0);
+    	}
     }
     else
     {
-
+    	if (RequestGetFile(ssl, auth_data, strings[4]))
+    	{
+            fprintf(stderr, "Get method fail\n");
+            exit(0);
+    	}
     }
-
-
-    printf("Send : %s\n", header);
-    SSL_write(ssl, header, strlen(header));			/* encrypt & send message */
-    bytes = SSL_read(ssl, buf, sizeof(buf));	/* get reply & decrypt */
-    buf[bytes] = 0;
-    printf("Received: \"%s\"\n", buf);
-
 
     SSL_free(ssl);								/* release connection state */
     close(server);									/* close socket */

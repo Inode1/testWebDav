@@ -1,7 +1,7 @@
-iCC=gcc
-CFLAGS=-c -Wall -I/usr/local/ssl/include
+CC=gcc
+CFLAGS=-c -Wall -D DEBUG -I/usr/local/ssl/include
 LDFLAGS=/usr/local/ssl/lib/libssl.a /usr/local/ssl/lib/libcrypto.a -ldl
-SOURCES=webdav.c utility.c
+SOURCES=webdav.c utility.c request.c
 OBJECTS=$(SOURCES:.c=.o)
 EXECUTABLE=webdav
 
