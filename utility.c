@@ -1,10 +1,7 @@
 #include <stdint.h>
 #include <fcntl.h>
 #include <sys/epoll.h>
-
-#include <openssl/bio.h>
-#include <openssl/evp.h>
-#include <openssl/buffer.h>
+#include <netdb.h>
 
 #include "utility.h"
 

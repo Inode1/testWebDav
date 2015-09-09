@@ -7,7 +7,13 @@
 
 #include <openssl/ssl.h>
 
-int RequestGetFile(SSL* ssl, const char *basicAuth, char *file);
-int RequestPutFile(SSL* ssl, const char *basicAuth, char *file);
+enum EMethod
+{
+    None,
+    Put,
+    Get
+};
+
+int MakeRequestFile(SSL* ssl, enum EMethod method, const char *basicAuth, char *file);
 
 #endif /* REQUEST_H_ */

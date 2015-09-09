@@ -7,12 +7,6 @@
 
 /*--------------------------------------------------------------------*/
 static char auth_data[AUTH_DATA_LENGHT];
-enum EMethod
-{
-    None,
-    Put,
-    Get
-};
 
 /*---------------------------------------------------------------------*/
 /*--- main - create SSL context and connect                         ---*/
@@ -70,10 +64,10 @@ int main(int count, char *strings[])
     ssl = SSL_new(ctx);						/* create new SSL connection state */
 	SSL_set_fd(ssl, server);				/* attach the socket descriptor */
    
-	// SSL_set_mode(ssl, SSL_MODE_AUTO_RETRY); // Can delete next loop, maybe
+	//SSL_set_mode(ssl, SSL_MODE_AUTO_RETRY); // Can delete next loop, maybe
 	while(1)
 	{
-		int err = SSL_connect(ssl);			/* perform the connection */
+		int err = SSL_connect(ssl);			 //perform the connection
 
 		if (err == 1)
 		{
@@ -93,21 +87,9 @@ int main(int count, char *strings[])
 
     printf("Connected with %s encryption\n", SSL_get_cipher(ssl));
     ShowCerts(ssl);							/* get any certs */
-    if (method == Put)
+    if (MakeRequestFile(ssl, method, base64EncodeOutput, strings[4]))
     {
-    	if (RequestPutFile(ssl, base64EncodeOutput, strings[4]))
-    	{
-            fprintf(stderr, "Put method fail\n");
-            exit(0);
-    	}
-    }
-    else
-    {
-    	if (RequestGetFile(ssl, base64EncodeOutput, strings[4]))
-    	{
-            fprintf(stderr, "Get method fail\n");
-            exit(0);
-    	}
+        fprintf(stderr, "Request method: %s fail\n", (method == Put ? "Put" : "Get"));
     }
 
     SSL_free(ssl);								/* release connection state */

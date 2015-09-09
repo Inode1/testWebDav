@@ -4,31 +4,31 @@
 #include <stdint.h>
 #include <fcntl.h>
 #include <sys/epoll.h>
+
+// none modified basename function
+#define _GNU_SOURCE
+#include <string.h>
 #include <libgen.h>
 #include <sys/stat.h>
 
 #include "header_template.h"
 #include "utility.h"
+#include "request.h"
 
 #define BUFFER_SIZE 1024
 #define HEADER_SIZE 500
+#define RESPONESTATUS 50
 
 static char header[HEADER_SIZE];
 
 enum HttpStatusCode
 {
-	None,
+	NoneStatus,
 	Informational = 1, // 1xx
 	Successful    = 2, // 2xx
 	Redirection   = 3, // 3xx
 	ClientError   = 4, // 4xx
 	ServerError   = 5  // 5xx
-};
-
-struct ResponeHeader
-{
-	enum HttpStatusCode Status;
-	uint32_t            ContentLength;
 };
 
 int ConstructHeaderGet(const char *basicAuth, char *file)
@@ -89,44 +89,44 @@ int ConstructHeaderPut(const char *basicAuth, char *file)
     return 0;
 }
 
-int ParseResponeHeader()
+enum HttpStatusCode ParseResponeHeader(const char *responseData)
 {
-	return 0;
+    char *findSubstring;
+    if ((findSubstring = strstr(responseData, "HTTP/1.1 ")) == NULL)
+    {
+        fprintf(stderr, "Error it`s not a header\n");
+        return 1;
+    }
+    // position status code
+    char status = (*(findSubstring + 9)) - '0';
+    if (status > 0 && status <= 5)
+    {
+         return (enum HttpStatusCode)(status);
+    }
+    else
+    {
+        fprintf(stderr, "Error it`s not a status code: %d\n", status);
+        return None;
+    }
 }
 
-int RequestGetFile(SSL* ssl, const char *basicAuth, char *file)
+int MakeRequestFile(SSL* ssl, enum EMethod method, const char *basicAuth, char *file)
 {
-	if (ConstructHeaderGet(basicAuth, file))
+	if (method == Put)
 	{
-        fprintf(stderr, "Error construct header for Get method\n");
-        return 1;
+        if (ConstructHeaderPut(basicAuth, file))
+        {
+            fprintf(stderr, "Error construct header for Put method\n");
+            return 1;
+        }
 	}
-
-#ifdef DEBUG
-    printf("Send : %s\n", header);
-#endif
-
-    char buf[BUFFER_SIZE];
-    // send header
-    SSL_write(ssl, header, strlen(header));			/* encrypt & send message */
-    // get response header
-    int bytes = SSL_read(ssl, buf, BUFFER_SIZE);	    /* get reply & decrypt */
-    buf[bytes] = 0;
-
-
-#ifdef DEBUG
-    printf("Received byte: %d\n", bytes);
-    printf("Received: %s\n", buf);
-#endif
-	return 0;
-}
-
-int RequestPutFile(SSL* ssl, const char *basicAuth, char *file)
-{
-	if (ConstructHeaderPut(basicAuth, file))
+	else
 	{
-        fprintf(stderr, "Error construct header for Put method\n");
-        return 1;
+        if (ConstructHeaderGet(basicAuth, file))
+        {
+            fprintf(stderr, "Error construct header for Put method\n");
+            return 1;
+        }
 	}
 #ifdef DEBUG
     printf("Send : %s\n", header);
@@ -161,6 +161,7 @@ int RequestPutFile(SSL* ssl, const char *basicAuth, char *file)
 
     char buf[BUFFER_SIZE];
     int n;
+    char headerFlag = 1;
     while(1)
     {
         if ((n = epoll_wait (epoll, &events, 1, 3000)) <= 0)
@@ -185,6 +186,7 @@ int RequestPutFile(SSL* ssl, const char *basicAuth, char *file)
         {
             while (1)
             {
+
                 n = SSL_read (ssl, buf, BUFFER_SIZE);
                 if (n <= 0)
                 {
@@ -195,14 +197,66 @@ int RequestPutFile(SSL* ssl, const char *basicAuth, char *file)
                 #ifdef DEBUG
                     printf("Recv : %s\n", buf);
                 #endif
+                if (headerFlag)
+                {
+                    headerFlag = 0;
+                    enum HttpStatusCode statusCode = ParseResponeHeader(buf);
+                    if (statusCode == Successful)
+                    {
+                        fprintf(stderr, "Successful\n");
+                        close(epoll);
+                        return 0;
+                    }
+                    if (statusCode != Informational)
+                    {
+                        fprintf(stderr, "Server not get permission\n");
+                        close(epoll);
+                        return 1;
+                    }
+                }
+                FILE *fd = fopen(file, "rb");
+                if (file == NULL)
+                {
+                    printf ("%s can't opened.\n", file);
+                    close(epoll);
+                    return 1;
+                }
+                // write in socket file
+                int bytes;
+                while ((bytes = fread (buf, 1, 1024, fd)) != 0)
+                {
+                    #ifdef DEBUG
+                    printf("Send : %s\n", buf);
+                    #endif
+
+                    // SSL_MODE_AUTO_RETRY don`t work. Maybe I do something wrong.
+                    while(1)
+                    {
+                        int err = SSL_write(ssl, buf, bytes);
+
+                        if (err > 0)
+                        {
+                            break;
+                        }
+                        int err2 = SSL_get_error(ssl,err);
+                        switch(err2) {
+                                case SSL_ERROR_WANT_READ:
+                                case SSL_ERROR_WANT_WRITE:
+                                    break;
+                                default:
+                                    printf("SSL_connect err=%s\n",ERR_error_string(err2,0));
+                                    close(epoll);
+                                    return 1;
+                                    break;
+                        }
+                    }
+                }
+                fclose(fd);
+                headerFlag = 1;
             }
 
         }
     }
-
-
-/*    int bytes = SSL_read(ssl, buf, BUFFER_SIZE);	     get reply & decrypt
-    buf[bytes] = 0;*/
     close(epoll);
     return 0;
 }
