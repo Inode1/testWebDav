@@ -15,7 +15,7 @@
 #include "utility.h"
 #include "request.h"
 
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 16384
 #define HEADER_SIZE 500
 #define RESPONESTATUS 50
 
@@ -89,7 +89,7 @@ int ConstructHeaderPut(const char *basicAuth, char *file)
     return 0;
 }
 
-enum HttpStatusCode ParseResponeHeader(const char *responseData)
+enum HttpStatusCode ParseResponeHeader(const char *responseData, int *contentLength)
 {
     char *findSubstring;
     if ((findSubstring = strstr(responseData, "HTTP/1.1 ")) == NULL)
@@ -99,6 +99,12 @@ enum HttpStatusCode ParseResponeHeader(const char *responseData)
     }
     // position status code
     char status = (*(findSubstring + 9)) - '0';
+    *contentLength = 0;
+    if ((findSubstring = strstr(responseData, "Content-Length: ")) != NULL)
+    {
+        findSubstring += 16;
+        *contentLength = atoi(findSubstring);
+    }
     if (status > 0 && status <= 5)
     {
          return (enum HttpStatusCode)(status);
@@ -108,6 +114,72 @@ enum HttpStatusCode ParseResponeHeader(const char *responseData)
         fprintf(stderr, "Error it`s not a status code: %d\n", status);
         return None;
     }
+}
+
+int PutMethod(char *buf, SSL *ssl, char *file)
+{
+    // put method
+    int temp;
+    enum HttpStatusCode statusCode = ParseResponeHeader(buf, &temp);
+    if (statusCode == Successful)
+    {
+        fprintf(stderr, "Successful\n");
+        return 0;
+    }
+    if (statusCode != Informational)
+    {
+        fprintf(stderr, "Server not get permission\n");
+        return 1;
+    }
+    FILE *fd = fopen(file, "rb");
+    if (file == NULL)
+    {
+        printf ("%s can't opened.\n", file);
+        return 1;
+    }
+    // write in socket file
+    int bytes;
+    while ((bytes = fread (buf, 1, BUFFER_SIZE, fd)) != 0)
+    {
+        #ifdef DEBUG
+        printf("Send : %s\n", buf);
+        #endif
+
+        // SSL_MODE_AUTO_RETRY don`t work. Maybe I do something wrong.
+        while(1)
+        {
+            int err = SSL_write(ssl, buf, bytes);
+
+            if (err > 0)
+            {
+                break;
+            }
+            int err2 = SSL_get_error(ssl,err);
+            switch(err2) {
+                    case SSL_ERROR_WANT_READ:
+                    case SSL_ERROR_WANT_WRITE:
+                        break;
+                    default:
+                        printf("SSL_write err=%s\n", ERR_error_string(err2,0));
+                        return 1;
+                        break;
+            }
+        }
+    }
+    fclose(fd);
+    return 0;
+}
+
+int GetMethod(char *buf, SSL *ssl, int *content)
+{
+    // get method
+    enum HttpStatusCode statusCode = ParseResponeHeader(buf, content);
+    if (statusCode != Successful)
+    {
+        fprintf(stderr, "non Successful status return\n");
+        return 1;
+    }
+    return 0;
 }
 
 int MakeRequestFile(SSL* ssl, enum EMethod method, const char *basicAuth, char *file)
@@ -161,10 +233,11 @@ int MakeRequestFile(SSL* ssl, enum EMethod method, const char *basicAuth, char *
 
     char buf[BUFFER_SIZE];
     int n;
-    char headerFlag = 1;
+    int content = 0;
+    int fd;
     while(1)
     {
-        if ((n = epoll_wait (epoll, &events, 1, 3000)) <= 0)
+        if ((n = epoll_wait (epoll, &events, 1, -1)) <= 0)
         {
             if (n == 0)
             {
@@ -186,7 +259,6 @@ int MakeRequestFile(SSL* ssl, enum EMethod method, const char *basicAuth, char *
         {
             while (1)
             {
-
                 n = SSL_read (ssl, buf, BUFFER_SIZE);
                 if (n <= 0)
                 {
@@ -197,62 +269,51 @@ int MakeRequestFile(SSL* ssl, enum EMethod method, const char *basicAuth, char *
                 #ifdef DEBUG
                     printf("Recv : %s\n", buf);
                 #endif
-                if (headerFlag)
+
+                if (method == Put)
                 {
-                    headerFlag = 0;
-                    enum HttpStatusCode statusCode = ParseResponeHeader(buf);
-                    if (statusCode == Successful)
+                    if (PutMethod(buf, ssl, file))
                     {
-                        fprintf(stderr, "Successful\n");
-                        close(epoll);
-                        return 0;
-                    }
-                    if (statusCode != Informational)
-                    {
-                        fprintf(stderr, "Server not get permission\n");
                         close(epoll);
                         return 1;
                     }
-                }
-                FILE *fd = fopen(file, "rb");
-                if (file == NULL)
-                {
-                    printf ("%s can't opened.\n", file);
-                    close(epoll);
-                    return 1;
-                }
-                // write in socket file
-                int bytes;
-                while ((bytes = fread (buf, 1, 1024, fd)) != 0)
-                {
-                    #ifdef DEBUG
-                    printf("Send : %s\n", buf);
-                    #endif
-
-                    // SSL_MODE_AUTO_RETRY don`t work. Maybe I do something wrong.
-                    while(1)
+                    else
                     {
-                        int err = SSL_write(ssl, buf, bytes);
-
-                        if (err > 0)
-                        {
-                            break;
-                        }
-                        int err2 = SSL_get_error(ssl,err);
-                        switch(err2) {
-                                case SSL_ERROR_WANT_READ:
-                                case SSL_ERROR_WANT_WRITE:
-                                    break;
-                                default:
-                                    printf("SSL_connect err=%s\n",ERR_error_string(err2,0));
-                                    close(epoll);
-                                    return 1;
-                                    break;
-                        }
+                        close(epoll);
+                        return 0;
                     }
                 }
-                fclose(fd);
-                headerFlag = 1;
+                else
+                {
+                    if (!content)
+                    {
+                        if (GetMethod(buf, ssl, &content))
+                        {
+                            close(epoll);
+                            return 1;
+                        }
+                        printf("Remaining get: %d bytes\n", content);
+                        mode_t mode = S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH;
+                        fd = creat(file, mode);
+                    }
+                    else
+                    {
+                        #ifdef DEBUG
+                            printf("Content: %d\n", content);
+                            printf("Recv data len: %d\n", n);
+                            printf("Recv : %s\n", buf);
+                        #endif
+                        printf("Remaining get: %d bytes\n", content);
+                        write(fd, buf, n);
+                        content -= n;
+                        if (!content)
+                        {
+                            close(epoll);
+                            return 0;
+                        }
+                    }
+
+                }
             }
 
         }
